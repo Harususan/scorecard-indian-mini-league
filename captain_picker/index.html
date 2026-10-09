@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body { margin:0; font-family:system-ui,sans-serif; color:#eaf0f8; background:transparent; font-size:13px; }
+label { display:block; margin:0 0 6px; font-weight:500; }
+select { width:100%; padding:10px; border:1px solid #314159; border-radius:8px; background:#182333; color:#eaf0f8; font-size:13px; }
+select:focus { outline:2px solid #1c9f6d; outline-offset:1px; }
+.row { margin-bottom:15px; }
+.note { color:#c0a46d; font-size:11px; margin:6px 0 0; }
+#status { color:#8ebaa5; font-size:11px; margin-bottom:12px; line-height:1.5; }
+</style></head><body><div id="status" role="status"></div><div id="pickers"></div>
+<script src="storage.js"></script><script>
+let args = null, store = null, state = null, lastValue = null;
+function send(type, data) {
+  window.parent.postMessage({isStreamlitMessage:true, type, ...data}, '*');
+}
+function height() { send('streamlit:setFrameHeight', {height:document.body.scrollHeight}); }
+function publish() {
+  const choices = {...state.choices};
+  for (const club of args.clubs) {
+    const stored = state.choices[club.name];
+    choices[club.name] = club.managers.some(m => m.id === stored) ? stored : null;
+  }
+  const value = {namespace:args.namespace, ready:true, choices, error:state.error};
+  const serial = JSON.stringify(value);
+  if (serial !== lastValue) {
+    lastValue = serial;
+    send('streamlit:setComponentValue', {value, dataType:'json'});
+  }
+}
+function draw() {
+  const status = document.getElementById('status');
+  status.textContent = state.error || 'Saved in this browser · restored automatically on your next visit.';
+  const pickers = document.getElementById('pickers');
+  pickers.replaceChildren();
+  args.clubs.forEach((club, index) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const label = document.createElement('label'); label.textContent = club.name; label.htmlFor = 'club-'+index;
+    const select = document.createElement('select'); select.id = label.htmlFor;
+    select.disabled = Boolean(args.disabled);
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Not selected'; select.append(empty);
+    for (const member of club.managers) {
+      const option = document.createElement('option'); option.value = member.id; option.textContent = member.manager; select.append(option);
+    }
+    const stored = state.choices[club.name];
+    select.value = club.managers.some(m => m.id === stored) ? stored : '';
+    select.addEventListener('change', () => {
+      state = store.save(club.name, select.value || null);
+      document.getElementById('status').textContent = state.error || 'Captain saved in this browser.';
+      const note = row.querySelector('.note'); if (note) note.remove();
+      publish(); height();
+    });
+    row.append(label, select);
+    if (stored && !club.managers.some(m => m.id === stored)) {
+      const note = document.createElement('p'); note.className = 'note'; note.textContent = 'Saved captain is no longer in this roster. Choose a replacement.'; row.append(note);
+    }
+    pickers.append(row);
+  });
+  height();
+}
+window.addEventListener('message', event => {
+  if (event.source !== window.parent || event.data?.type !== 'streamlit:render') return;
+  const next = event.data.args;
+  if (!args || next.namespace !== args.namespace) {
+    let storage;
+    try { storage = window.localStorage; }
+    catch (_) { storage = {getItem(){throw new Error('blocked')},setItem(){throw new Error('blocked')}}; }
+    store = CaptainStorage.createStore(storage, next.namespace);
+    lastValue = null;
+  }
+  args = {...next, disabled:event.data.disabled};
+  state = store.read(); draw(); publish();
+});
+window.addEventListener('storage', event => {
+  if (store && (event.key === store.key || event.key === null)) { state = store.read(); draw(); publish(); }
+});
+new ResizeObserver(height).observe(document.body);
+send('streamlit:componentReady', {apiVersion:1});
+</script></body></html>

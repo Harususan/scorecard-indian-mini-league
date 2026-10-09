@@ -1,0 +1,5 @@
+.env
+.iml_cache/
+.scorecard_deps/
+__pycache__/
+.iml_data/
